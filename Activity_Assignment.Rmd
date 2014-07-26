@@ -1,0 +1,69 @@
+---
+title: "Activity Classification"
+output: html_document
+---
+
+The train and the test files are downloaded from
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har
+Exploring the data suggested some variables that were not useful eitherdue to very few valid values, mostly NAs or just constants (or zeros). I have removed those variables.
+```{r}
+library(caret)
+#url1<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+#url2<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+#download.file(url1, "./train.csv")
+#download.file(url2, "./test.csv")
+initialtrain<-read.csv("./train.csv",  na.strings=c("NA", "", " ", "#DIV/0!"))
+# remove all variables that has more than 19000 NAs
+lv<-(apply(initialtrain, 2, function(x){sum(is.na(x))}))>19000
+initialtrain<-initialtrain[!lv]
+# remove others that do not seem to have any impact
+initialtrain<-subset(initialtrain, select=-c( X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp, new_window, num_window))
+# Also look at the correlations and remove highly correlated variables
+initialtrain[, 1:(dim(initialtrain)[2]-1)] <- sapply(initialtrain[, 1:(dim(initialtrain)[2]-1)], as.numeric)
+cor<-as.matrix(cor(initialtrain[, 1:(dim(initialtrain)[2]-1)]))
+corVarIndex<-findCorrelation(cor)
+initialtrain<-initialtrain[, -corVarIndex]
+```
+I wind up with 46 variables. Even with these many variables, when I run methods such as random forests, GBM etc, it takes hours and many times I had to kill the R process and started again. I used the following code to use all of the 4 cores in my machine and speed up the process. I came across this piece of code in one of the discussion forums and then researched some more on it.
+
+```{r}
+library(doParallel)
+cl<-makeCluster(detectCores())
+registerDoParallel(cl)
+```
+
+I partitioned the training set further into a test set and a training set. 
+```{r}
+inTrain<-createDataPartition(y=initialtrain$classe, p=0.7, list=FALSE)
+training<-initialtrain[inTrain,]
+testing<-initialtrain[-inTrain,]
+```
+I explored the data a bit researched a few algorithms. Random forest seemed like a good bet. Before using the modelfit though, I wanted to preprocess the data using PCA. A threshold of 
+0.9 gave me about 20 variables. I went ahead and directly used the preProcess in the train function along with random forest method and traincontrol = "cv". 
+
+```{r}
+
+rffit<-train(classe ~ ., method="rf", preProcess = "pca", trcontrol=trainControl("cv"), data=training)
+```
+The Final Model is 
+
+```{r, echo=FALSE}
+rffit$finalModel
+```
+```{r}
+pred<-predict(rffit,testing)
+```
+
+```{r, echo=FALSE}
+confusionMatrix(testing$classe, pred)
+
+```
+I ran the above a few times looked at the accuracy on the training set and finetuned the parameters. Finally I tested it using the final test set of 20 samples which is required to submit.
+
+```{r}
+finaltest<-read.csv("./test.csv")
+predict(rffit,finaltest)
+```
+
